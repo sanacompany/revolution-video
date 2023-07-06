@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="utf-8">
+  <head>
+    <script src="https://www.webrtc-experiment.com/RecordRTC.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    <!-- recommended -->
+    <script src="https://www.WebRTC-Experiment.com/RecordRTC.js"></script>
+    <style>
+      .container {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+​
+      }
+      .video-container {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+      }
+    </style>
+  </head>
+  
+  <body>
+    <div class="container">
+      <div class="video-container">
+        <video id="blurredVideo" autoplay width="640px" height="480px"></video>
+        <canvas id="canvas-video" width="640px" height="480px"></canvas>
+      </div>
+      <div class="buttons-div">
+        <button id="startButton">Start</button>
+        <button id="stopButton">Stop</button>
+        <button id="downloadButton">Download</button>
+      </div>
+    </div>
+    
+  </body>
+  <script type="module">
+    // Access the video element
+    const blurredVideo = document.getElementById('blurredVideo');
+    const canvasElement = document.getElementById('canvas-video');
+    const canvasCtx = canvasElement.getContext('2d');
+    const canvasStream = canvasElement.captureStream(30);
+    var recorder = null;
+    var isRecording = false;
+    var canvasBlob = null;
+    var audioTracks = null;
+    var camera = null;
+​
+    const selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+    }});
+    selfieSegmentation.setOptions({
+      modelSelection: 1,
+    });
+    selfieSegmentation.onResults(onResults);
+    
+    // Function to process video frames and apply blur
+    function onResults(results) {
+      //   // Get the current video frame
+      // const videoFrame = document.createElement('canvas');
+      canvasCtx.save();
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+​
+      // Make all pixels not in the segmentation mask transparent
+      canvasCtx.globalCompositeOperation = 'destination-atop';
+      canvasCtx.drawImage(results.segmentationMask, 0, 0, canvasElement.width, canvasElement.height);
+​
+      // Blur the context for all subsequent draws then set the raw image as the background
+      canvasCtx.filter = 'blur(16px)';
+      canvasCtx.globalCompositeOperation = 'destination-over';
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+​
+      // Restore the context's blank state
+      canvasCtx.restore();
+    }    
+​
+    async function recordCamera() {
+      camera = new Camera(blurredVideo, {
+      onFrame: async () => {
+        await selfieSegmentation.send({image: blurredVideo});
+      },
+      width: 640,
+      height: 480
+    });
+    }
+​
+    async function recordWithMic() {
+      return new Promise(resolve => {
+          captureMic(function(voiceStream) {
+              var audioContext = new AudioContext();
+              var userAudio = audioContext.createMediaStreamSource(voiceStream);
+              var audioDestination = audioContext.createMediaStreamDestination();
+              userAudio.connect(audioDestination);
+              audioTracks = audioDestination.stream.getTracks();
+              resolve();
+          });
+      })
+    }
+​
+    async function captureMic(callback) {
+        navigator.mediaDevices.getUserMedia({ audio: {'echoCancellation': true, 'noiseSuppression': true}, video: false })
+        .then(function(voiceStream) {
+            callback(voiceStream);
+        }).catch(function(err) {
+            console.log(err); /* handle the error */
+            
+        });
+    }
+​
+    async function startRecord() {
+      await recordWithMic();
+      await recordCamera();
+      initializeCanvasRecorder();
+      camera.start();
+      recorder.startRecording();
+​
+      
+      isRecording = true;
+    }
+  
+    
+    
+    
+    document.getElementById('startButton').addEventListener('click', () => {
+      startRecord()
+    });
+​
+    document.getElementById('stopButton').addEventListener('click', () => {
+      camera.stop();
+      recorder.stopRecording(function() {
+        canvasBlob = recorder.getBlob();
+        console.log(canvasBlob);
+        blurredVideo.src = URL.createObjectURL(canvasBlob);
+        // blurredVideo.volume = 1;
+        // blurredVideo.controls = true;
+      });
+      isRecording = false;
+    })
+​
+    document.getElementById('downloadButton').addEventListener('click', () => {
+      // if (recordedChunks.length > 0) {
+      if (canvasBlob) {
+        // const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(canvasBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'segmentation_video.webm';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    });
+​
+    function initializeCanvasRecorder(){
+      
+      var tracks = [...canvasStream.getVideoTracks(), ...audioTracks];
+      var stream = new MediaStream(tracks);
+      recorder = new RecordRTC(stream, {
+        type: 'videos',
+        mimeType: 'video/webm;'
+​
+      });
+    }
+  </script>
+</html>
